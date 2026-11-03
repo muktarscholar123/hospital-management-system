@@ -1,0 +1,1157 @@
+// Prisma Schema for Hospital Management System (HMS)
+// Database: MySQL 8.0+
+// Baseline: Aligned with documentation/SRS.md and documentation/DATABASE_DESIGN.md
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// =========================================================================
+// 1. STAFF & ROLE-BASED ACCESS CONTROL (RBAC)
+// =========================================================================
+
+model User {
+  id           Int       @id @default(autoincrement())
+  username     String    @unique @db.VarChar(50)
+  email        String    @unique @db.VarChar(100)
+  passwordHash String    @db.VarChar(255)
+  isActive     Boolean   @default(true)
+  lastLogin    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  profile            StaffProfile?
+  userRoles          UserRole[]
+  userDepartments    UserDepartment[]
+  auditLogs          AuditLog[]
+  recordedVitals     Observation[]
+  consultations      Consultation[]
+  orderedLabOrders   LabOrder[]
+  collectedSamples   LabSample[]
+  enteredLabResults  LabResult[]       @relation("ResultEnteredBy")
+  verifiedLabResults LabResult[]       @relation("ResultVerifiedBy")
+  releasedLabResults LabResult[]       @relation("ResultReleasedBy")
+  prescriptions      Prescription[]
+  dispensedRecords   DispensingRecord[]
+  performedStockTx   StockTransaction[]
+  collectedPayments  Payment[]
+  bookedAppointments Appointment[]     @relation("BookedAppointments")
+  doctorAppointments Appointment[]     @relation("DoctorAppointments")
+  admittedPatients   Admission[]       @relation("AdmittedBy")
+  dischargedPatients Admission[]       @relation("DischargedBy")
+  attendedAntenatal  AntenatalRecord[]
+  admittedLabour     LabourEpisode[]
+  labourObservations LabourObservation[]
+  attendedDeliveries Delivery[]        @relation("DeliveredBy")
+  assistedDeliveries Delivery[]        @relation("AssistedBy")
+  examinedNewborns   Newborn[]
+  postnatalObs       PostnatalObservation[]
+  maternityDischarges MaternityDischarge[]
+  createdInvoices    Invoice[]
+  approvedAdjustments FinancialAdjustment[]
+
+  @@map("users")
+}
+
+model StaffProfile {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @unique
+  firstName   String   @db.VarChar(50)
+  lastName    String   @db.VarChar(50)
+  staffNumber String   @unique @db.VarChar(30)
+  designation String   @db.VarChar(100)
+  phone       String?  @db.VarChar(20)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("staff_profiles")
+}
+
+model Department {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique @db.VarChar(30)
+  name        String   @db.VarChar(100)
+  description String?  @db.VarChar(255)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userDepartments UserDepartment[]
+  visits          Visit[]
+  appointments    Appointment[]
+
+  @@map("departments")
+}
+
+model Role {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(50)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now())
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique @db.VarChar(80)
+  module      String   @db.VarChar(50)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  roleId     Int
+  assignedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           Int      @id @default(autoincrement())
+  roleId       Int
+  permissionId Int
+  assignedAt   DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserDepartment {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  departmentId Int
+  assignedAt   DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, departmentId])
+  @@map("user_departments")
+}
+
+// =========================================================================
+// 2. PATIENT & VISITS
+// =========================================================================
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+model Patient {
+  id                     Int       @id @default(autoincrement())
+  patientNumber          String    @unique @db.VarChar(30)
+  firstName              String    @db.VarChar(50)
+  lastName               String    @db.VarChar(50)
+  otherNames             String?   @db.VarChar(50)
+  dateOfBirth            DateTime  @db.Date
+  gender                 Gender
+  phone                  String?   @db.VarChar(20)
+  email                  String?   @db.VarChar(100)
+  address                String?   @db.Text
+  bloodGroup             String?   @db.VarChar(5)
+  genotype               String?   @db.VarChar(5)
+  emergencyContactName   String?   @db.VarChar(100)
+  emergencyContactPhone  String?   @db.VarChar(20)
+  emergencyContactRel    String?   @db.VarChar(50)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  contacts           PatientContact[]
+  visits             Visit[]
+  appointments       Appointment[]
+  admissions         Admission[]
+  observations       Observation[]
+  consultations      Consultation[]
+  labOrders          LabOrder[]
+  prescriptions      Prescription[]
+  invoices           Invoice[]
+  payments           Payment[]
+  pregnancyEpisodes  PregnancyEpisode[]
+  obstetricHistories ObstetricHistory[]
+
+  @@index([patientNumber])
+  @@index([lastName, firstName])
+  @@index([phone])
+  @@map("patients")
+}
+
+model PatientContact {
+  id           Int      @id @default(autoincrement())
+  patientId    Int
+  name         String   @db.VarChar(100)
+  relationship String   @db.VarChar(50)
+  phone        String   @db.VarChar(20)
+  email        String?  @db.VarChar(100)
+  address      String?  @db.Text
+  isNextOfKin  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("patient_contacts")
+}
+
+enum VisitType {
+  OUTPATIENT
+  EMERGENCY
+  INPATIENT
+}
+
+enum VisitStatus {
+  REGISTERED
+  AWAITING_TRIAGE
+  AWAITING_CONSULTATION
+  AWAITING_INVESTIGATION
+  AWAITING_PAYMENT
+  COMPLETED
+  CANCELLED
+}
+
+enum Priority {
+  ROUTINE
+  URGENT
+  EMERGENCY
+}
+
+model Visit {
+  id             Int         @id @default(autoincrement())
+  visitNumber    String      @unique @db.VarChar(30)
+  patientId      Int
+  departmentId   Int?
+  visitType      VisitType   @default(OUTPATIENT)
+  status         VisitStatus @default(REGISTERED)
+  priority       Priority    @default(ROUTINE)
+  chiefComplaint String?     @db.Text
+  arrivalTime    DateTime    @default(now())
+  closureTime    DateTime?
+  closedById     Int?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  patient          Patient           @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  department       Department?       @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  admissions       Admission[]
+  observations     Observation[]
+  consultations    Consultation[]
+  labOrders        LabOrder[]
+  prescriptions    Prescription[]
+  invoices         Invoice[]
+  antenatalRecords AntenatalRecord[]
+
+  @@index([visitNumber])
+  @@index([patientId])
+  @@index([status])
+  @@map("visits")
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Appointment {
+  id           Int               @id @default(autoincrement())
+  patientId    Int
+  doctorId     Int?
+  departmentId Int?
+  scheduledAt  DateTime
+  status       AppointmentStatus @default(SCHEDULED)
+  reason       String?           @db.VarChar(255)
+  bookedById   Int
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  patient    Patient     @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctor     User?       @relation("DoctorAppointments", fields: [doctorId], references: [id], onDelete: SetNull)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  bookedBy   User        @relation("BookedAppointments", fields: [bookedById], references: [id], onDelete: Restrict)
+
+  @@index([patientId])
+  @@index([scheduledAt])
+  @@map("appointments")
+}
+
+enum AdmissionStatus {
+  ADMITTED
+  DISCHARGED
+  TRANSFERRED
+}
+
+model Admission {
+  id               Int             @id @default(autoincrement())
+  admissionNumber  String          @unique @db.VarChar(30)
+  patientId        Int
+  visitId          Int
+  ward             String          @db.VarChar(50)
+  bedNumber        String          @db.VarChar(20)
+  admittedAt       DateTime        @default(now())
+  dischargedAt     DateTime?
+  admittedById     Int
+  dischargedById   Int?
+  status           AdmissionStatus @default(ADMITTED)
+  dischargeSummary String?         @db.Text
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  patient      Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  visit        Visit   @relation(fields: [visitId], references: [id], onDelete: Restrict)
+  admittedBy   User    @relation("AdmittedBy", fields: [admittedById], references: [id], onDelete: Restrict)
+  dischargedBy User?   @relation("DischargedBy", fields: [dischargedById], references: [id], onDelete: SetNull)
+
+  @@index([admissionNumber])
+  @@index([patientId])
+  @@index([status])
+  @@map("admissions")
+}
+
+// =========================================================================
+// 3. CLINICAL RECORDS (NURSING & DOCTORS)
+// =========================================================================
+
+model Observation {
+  id                    Int      @id @default(autoincrement())
+  patientId             Int
+  visitId               Int
+  recordedById          Int
+  temperature           Decimal? @db.Decimal(4, 1)
+  bloodPressureSystolic Int?
+  bloodPressureDiastolic Int?
+  pulseRate             Int?
+  respiratoryRate       Int?
+  oxygenSaturation      Decimal? @db.Decimal(5, 2)
+  weightKg              Decimal? @db.Decimal(5, 2)
+  heightCm              Decimal? @db.Decimal(5, 2)
+  painScale             Int?
+  notes                 String?  @db.Text
+  recordedAt            DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  patient    Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  visit      Visit   @relation(fields: [visitId], references: [id], onDelete: Restrict)
+  recordedBy User    @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([patientId])
+  @@index([visitId])
+  @@map("observations")
+}
+
+model Consultation {
+  id                        Int       @id @default(autoincrement())
+  patientId                 Int
+  visitId                   Int
+  doctorId                  Int
+  clinicalNotes             String    @db.Text
+  historyOfPresentingIllness String?   @db.Text
+  physicalExamination       String?   @db.Text
+  isFinalized               Boolean   @default(false)
+  finalizedAt               DateTime?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  patient   Patient     @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  visit     Visit       @relation(fields: [visitId], references: [id], onDelete: Restrict)
+  doctor    User        @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  diagnoses Diagnosis[]
+  carePlans CarePlan[]
+
+  @@index([patientId])
+  @@index([visitId])
+  @@map("consultations")
+}
+
+enum DiagnosisType {
+  PROVISIONAL
+  FINAL
+}
+
+model Diagnosis {
+  id             Int           @id @default(autoincrement())
+  consultationId Int
+  diagnosisCode  String?       @db.VarChar(20)
+  description    String        @db.VarChar(255)
+  type           DiagnosisType @default(PROVISIONAL)
+  createdAt      DateTime      @default(now())
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+
+  @@map("diagnoses")
+}
+
+model CarePlan {
+  id                   Int       @id @default(autoincrement())
+  consultationId       Int
+  treatmentPlan        String    @db.Text
+  followUpDate         DateTime? @db.Date
+  followUpInstructions String?   @db.Text
+  createdAt            DateTime  @default(now())
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+
+  @@map("care_plans")
+}
+
+model RecordAmendment {
+  id           Int      @id @default(autoincrement())
+  entityType   String   @db.VarChar(50)
+  entityId     Int
+  originalData String   @db.Text
+  amendedData  String   @db.Text
+  reason       String   @db.Text
+  amendedById  Int
+  amendedAt    DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@map("record_amendments")
+}
+
+// =========================================================================
+// 4. LABORATORY
+// =========================================================================
+
+model LabTestCatalogue {
+  id             Int      @id @default(autoincrement())
+  testCode       String   @unique @db.VarChar(30)
+  testName       String   @db.VarChar(100)
+  category       String   @db.VarChar(50)
+  description    String?  @db.VarChar(255)
+  sampleType     String   @db.VarChar(50)
+  unit           String?  @db.VarChar(30)
+  referenceRange String?  @db.VarChar(100)
+  price          Decimal  @db.Decimal(12, 2)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  orderItems LabOrderItem[]
+
+  @@map("lab_test_catalogue")
+}
+
+enum LabOrderStatus {
+  ORDERED
+  SAMPLE_COLLECTED
+  PROCESSING
+  AWAITING_VERIFICATION
+  VERIFIED
+  RELEASED
+  CANCELLED
+}
+
+model LabOrder {
+  id            Int            @id @default(autoincrement())
+  orderNumber   String         @unique @db.VarChar(30)
+  patientId     Int
+  visitId       Int
+  orderedById   Int
+  clinicalNotes String?        @db.Text
+  priority      Priority       @default(ROUTINE)
+  status        LabOrderStatus @default(ORDERED)
+  orderedAt     DateTime       @default(now())
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  patient    Patient        @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  visit      Visit          @relation(fields: [visitId], references: [id], onDelete: Restrict)
+  orderedBy  User           @relation(fields: [orderedById], references: [id], onDelete: Restrict)
+  orderItems LabOrderItem[]
+  samples    LabSample[]
+
+  @@index([orderNumber])
+  @@index([patientId])
+  @@index([status])
+  @@map("lab_orders")
+}
+
+enum ItemProcessStatus {
+  ORDERED
+  PROCESSING
+  COMPLETED
+  CANCELLED
+}
+
+model LabOrderItem {
+  id         Int               @id @default(autoincrement())
+  labOrderId Int
+  testId     Int
+  status     ItemProcessStatus @default(ORDERED)
+
+  labOrder LabOrder         @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
+  test     LabTestCatalogue @relation(fields: [testId], references: [id], onDelete: Restrict)
+  result   LabResult?
+
+  @@map("lab_order_items")
+}
+
+enum SampleStatus {
+  PENDING
+  COLLECTED
+  REJECTED
+}
+
+model LabSample {
+  id              Int          @id @default(autoincrement())
+  labOrderId      Int
+  sampleBarcode   String       @unique @db.VarChar(50)
+  sampleType      String       @db.VarChar(50)
+  collectedById   Int?
+  collectedAt     DateTime?
+  status          SampleStatus @default(PENDING)
+  rejectionReason String?      @db.VarChar(255)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  labOrder    LabOrder @relation(fields: [labOrderId], references: [id], onDelete: Cascade)
+  collectedBy User?    @relation(fields: [collectedById], references: [id], onDelete: SetNull)
+
+  @@map("lab_samples")
+}
+
+enum ResultStatus {
+  DRAFT
+  VERIFIED
+  RELEASED
+  AMENDED
+}
+
+model LabResult {
+  id             Int          @id @default(autoincrement())
+  orderItemId    Int          @unique
+  resultValue    String       @db.VarChar(255)
+  unit           String?      @db.VarChar(30)
+  referenceRange String?      @db.VarChar(100)
+  isAbnormal     Boolean      @default(false)
+  remarks        String?      @db.Text
+  status         ResultStatus @default(DRAFT)
+  enteredById    Int
+  enteredAt      DateTime     @default(now())
+  verifiedById   Int?
+  verifiedAt     DateTime?
+  releasedById   Int?
+  releasedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  orderItem  LabOrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  enteredBy  User         @relation("ResultEnteredBy", fields: [enteredById], references: [id], onDelete: Restrict)
+  verifiedBy User?        @relation("ResultVerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  releasedBy User?        @relation("ResultReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+
+  @@map("lab_results")
+}
+
+// =========================================================================
+// 5. PHARMACY & INVENTORY
+// =========================================================================
+
+model Medicine {
+  id                Int      @id @default(autoincrement())
+  drugCode          String   @unique @db.VarChar(30)
+  name              String   @db.VarChar(100)
+  genericName       String?  @db.VarChar(100)
+  category          String   @db.VarChar(50)
+  dosageForm        String   @db.VarChar(50)
+  strength          String   @db.VarChar(50)
+  unitOfMeasure     String   @db.VarChar(30)
+  minimumStockLevel Int      @default(10)
+  unitPrice         Decimal  @db.Decimal(12, 2)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  batches           StockBatch[]
+  stockTransactions StockTransaction[]
+  prescriptionItems PrescriptionItem[]
+
+  @@map("medicines")
+}
+
+model StockBatch {
+  id                Int      @id @default(autoincrement())
+  medicineId        Int
+  batchNumber       String   @db.VarChar(50)
+  expiryDate        DateTime @db.Date
+  quantityAvailable Int      @default(0)
+  unitCost          Decimal  @db.Decimal(12, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  medicine          Medicine           @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  stockTransactions StockTransaction[]
+  dispensingRecords DispensingRecord[]
+
+  @@unique([medicineId, batchNumber])
+  @@index([expiryDate])
+  @@map("stock_batches")
+}
+
+enum StockTransactionType {
+  RECEIPT
+  DISPENSE
+  ADJUSTMENT
+  RETURN
+  REVERSAL
+}
+
+model StockTransaction {
+  id              Int                  @id @default(autoincrement())
+  medicineId      Int
+  batchId         Int?
+  transactionType StockTransactionType
+  quantity        Int
+  previousStock   Int
+  newStock        Int
+  reason          String?              @db.VarChar(255)
+  referenceNumber String?              @db.VarChar(50)
+  performedById   Int
+  createdAt       DateTime             @default(now())
+
+  medicine    Medicine    @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  batch       StockBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  performedBy User        @relation(fields: [performedById], references: [id], onDelete: Restrict)
+
+  @@index([medicineId])
+  @@index([createdAt])
+  @@map("stock_transactions")
+}
+
+enum PrescriptionStatus {
+  PENDING
+  PARTIALLY_DISPENSED
+  FULLY_DISPENSED
+  CANCELLED
+}
+
+model Prescription {
+  id                 Int                @id @default(autoincrement())
+  prescriptionNumber String             @unique @db.VarChar(30)
+  patientId          Int
+  visitId            Int
+  prescribedById     Int
+  status             PrescriptionStatus @default(PENDING)
+  notes              String?            @db.Text
+  prescribedAt       DateTime           @default(now())
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  patient      Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  visit        Visit              @relation(fields: [visitId], references: [id], onDelete: Restrict)
+  prescribedBy User               @relation(fields: [prescribedById], references: [id], onDelete: Restrict)
+  items        PrescriptionItem[]
+
+  @@index([prescriptionNumber])
+  @@index([patientId])
+  @@index([status])
+  @@map("prescriptions")
+}
+
+enum ItemDispenseStatus {
+  PENDING
+  PARTIALLY_DISPENSED
+  DISPENSED
+  CANCELLED
+}
+
+model PrescriptionItem {
+  id                 Int                @id @default(autoincrement())
+  prescriptionId     Int
+  medicineId         Int
+  dosage             String             @db.VarChar(50)
+  route              String             @db.VarChar(50)
+  frequency          String             @db.VarChar(50)
+  duration           String             @db.VarChar(50)
+  quantityPrescribed Int
+  quantityDispensed  Int                @default(0)
+  instructions       String?            @db.VarChar(255)
+  status             ItemDispenseStatus @default(PENDING)
+
+  prescription      Prescription       @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicine          Medicine           @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  dispensingRecords DispensingRecord[]
+
+  @@map("prescription_items")
+}
+
+model DispensingRecord {
+  id                 Int      @id @default(autoincrement())
+  prescriptionItemId Int
+  batchId            Int?
+  quantityDispensed  Int
+  dispensedById      Int
+  dispensedAt        DateTime @default(now())
+  remarks            String?  @db.VarChar(255)
+
+  prescriptionItem PrescriptionItem @relation(fields: [prescriptionItemId], references: [id], onDelete: Cascade)
+  batch            StockBatch?      @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  dispensedBy      User             @relation(fields: [dispensedById], references: [id], onDelete: Restrict)
+
+  @@map("dispensing_records")
+}
+
+// =========================================================================
+// 6. BILLING & CASHIER
+// =========================================================================
+
+model ServiceCatalogue {
+  id          Int      @id @default(autoincrement())
+  serviceCode String   @unique @db.VarChar(30)
+  name        String   @db.VarChar(100)
+  category    String   @db.VarChar(50)
+  description String?  @db.VarChar(255)
+  price       Decimal  @db.Decimal(12, 2)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("service_catalogue")
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+model Invoice {
+  id             Int           @id @default(autoincrement())
+  invoiceNumber  String        @unique @db.VarChar(30)
+  patientId      Int
+  visitId        Int?
+  totalAmount    Decimal       @db.Decimal(12, 2)
+  discountAmount Decimal       @default(0.00) @db.Decimal(12, 2)
+  paidAmount     Decimal       @default(0.00) @db.Decimal(12, 2)
+  balanceDue     Decimal       @db.Decimal(12, 2)
+  status         InvoiceStatus @default(UNPAID)
+  createdById    Int
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  patient     Patient               @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  visit       Visit?                @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  createdBy   User                  @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  items       InvoiceItem[]
+  payments    Payment[]
+  adjustments FinancialAdjustment[]
+
+  @@index([invoiceNumber])
+  @@index([patientId])
+  @@index([status])
+  @@map("invoices")
+}
+
+enum InvoiceItemType {
+  SERVICE
+  LAB_TEST
+  MEDICINE
+  ADMISSION
+  PROCEDURE
+  OTHER
+}
+
+model InvoiceItem {
+  id          Int             @id @default(autoincrement())
+  invoiceId   Int
+  itemType    InvoiceItemType @default(SERVICE)
+  itemId      Int?
+  description String          @db.VarChar(255)
+  quantity    Int             @default(1)
+  unitPrice   Decimal         @db.Decimal(12, 2)
+  totalPrice  Decimal         @db.Decimal(12, 2)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_items")
+}
+
+enum PaymentMethod {
+  CASH
+  POS
+  BANK_TRANSFER
+  CHEQUE
+  OTHER
+}
+
+enum PaymentStatus {
+  COMPLETED
+  REVERSED
+}
+
+model Payment {
+  id               Int           @id @default(autoincrement())
+  receiptNumber    String        @unique @db.VarChar(30)
+  invoiceId        Int
+  patientId        Int
+  amount           Decimal       @db.Decimal(12, 2)
+  paymentMethod    PaymentMethod @default(CASH)
+  paymentReference String?       @db.VarChar(50)
+  status           PaymentStatus @default(COMPLETED)
+  receivedById     Int
+  paidAt           DateTime      @default(now())
+  createdAt        DateTime      @default(now())
+
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  patient    Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  receivedBy User    @relation(fields: [receivedById], references: [id], onDelete: Restrict)
+
+  @@index([receiptNumber])
+  @@index([invoiceId])
+  @@index([patientId])
+  @@map("payments")
+}
+
+enum AdjustmentType {
+  DISCOUNT
+  WAIVER
+  REVERSAL
+  REFUND
+}
+
+model FinancialAdjustment {
+  id             Int            @id @default(autoincrement())
+  invoiceId      Int
+  adjustmentType AdjustmentType
+  amount         Decimal        @db.Decimal(12, 2)
+  reason         String         @db.Text
+  approvedById   Int
+  createdAt      DateTime       @default(now())
+
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  approvedBy User    @relation(fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@map("financial_adjustments")
+}
+
+// =========================================================================
+// 7. LABOUR ROOM & MATERNITY (SRS 4.9 & WORKFLOWS)
+// Note: Each pregnancy is distinct; deliveries support multiple newborns.
+// =========================================================================
+
+enum PregnancyStatus {
+  BOOKED
+  ACTIVE
+  DELIVERED
+  DISCHARGED
+  COMPLETED
+  CANCELLED
+}
+
+model PregnancyEpisode {
+  id                           Int             @id @default(autoincrement())
+  episodeNumber                String          @unique @db.VarChar(30)
+  patientId                    Int
+  lastMenstrualPeriod          DateTime?       @db.Date
+  estimatedDateOfDelivery      DateTime?       @db.Date
+  gestationalAgeAtBookingWeeks Int?
+  gravida                      Int             @default(1)
+  para                         Int             @default(0)
+  aliveChildren                Int             @default(0)
+  abortions                    Int             @default(0)
+  bloodGroup                   String?         @db.VarChar(5)
+  rhFactor                     String?         @db.VarChar(10)
+  serologyStatus               String?         @db.VarChar(100)
+  status                       PregnancyStatus @default(BOOKED)
+  bookingDate                  DateTime        @default(now())
+  createdAt                    DateTime        @default(now())
+  updatedAt                    DateTime        @updatedAt
+
+  patient               Patient                @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  antenatalRecords      AntenatalRecord[]
+  obstetricHistories    ObstetricHistory[]
+  labourEpisodes        LabourEpisode[]
+  deliveries            Delivery[]
+  postnatalObservations PostnatalObservation[]
+  maternityDischarge    MaternityDischarge?
+
+  @@index([episodeNumber])
+  @@index([patientId])
+  @@index([status])
+  @@map("pregnancy_episodes")
+}
+
+model AntenatalRecord {
+  id                   Int       @id @default(autoincrement())
+  pregnancyEpisodeId   Int
+  visitId              Int?
+  visitDate            DateTime  @default(now())
+  gestationalAgeWeeks  Decimal?  @db.Decimal(4, 1)
+  fundalHeightCm       Decimal?  @db.Decimal(4, 1)
+  fetalHeartRateBpm    Int?
+  fetalPresentation    String?   @db.VarChar(50)
+  fetalLie             String?   @db.VarChar(50)
+  maternalWeightKg     Decimal?  @db.Decimal(5, 2)
+  maternalBloodPressure String?  @db.VarChar(20)
+  urinalysisProtein    String?   @db.VarChar(20)
+  urinalysisGlucose    String?   @db.VarChar(20)
+  complaints           String?   @db.Text
+  attendedById         Int
+  nextAppointmentDate  DateTime? @db.Date
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  pregnancyEpisode PregnancyEpisode @relation(fields: [pregnancyEpisodeId], references: [id], onDelete: Restrict)
+  visit            Visit?           @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  attendedBy       User             @relation(fields: [attendedById], references: [id], onDelete: Restrict)
+
+  @@index([pregnancyEpisodeId])
+  @@map("antenatal_records")
+}
+
+model ObstetricHistory {
+  id                        Int      @id @default(autoincrement())
+  patientId                 Int
+  pregnancyEpisodeId        Int?
+  yearOfPregnancy           Int
+  gestationalAgeAtDelivery  String?  @db.VarChar(30)
+  deliveryMode              String?  @db.VarChar(50)
+  deliveryLocation          String?  @db.VarChar(100)
+  birthWeightKg             Decimal? @db.Decimal(4, 2)
+  babyGender                String?  @db.VarChar(10)
+  outcome                   String   @db.VarChar(50)
+  complications             String?  @db.Text
+  createdAt                 DateTime @default(now())
+
+  patient          Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  pregnancyEpisode PregnancyEpisode? @relation(fields: [pregnancyEpisodeId], references: [id], onDelete: SetNull)
+
+  @@map("obstetric_histories")
+}
+
+enum MembraneStatus {
+  INTACT
+  RUPTURED
+}
+
+enum LabourStatus {
+  IN_PROGRESS
+  DELIVERED
+  TRANSFERRED_TO_THEATRE
+  COMPLICATED
+}
+
+model LabourEpisode {
+  id              Int            @id @default(autoincrement())
+  pregnancyEpisodeId Int
+  admissionDate   DateTime       @default(now())
+  onsetOfLabour   DateTime?
+  membraneStatus  MembraneStatus @default(INTACT)
+  ruptureDateTime DateTime?
+  liquorColor     String?        @db.VarChar(50)
+  status          LabourStatus   @default(IN_PROGRESS)
+  admittedById    Int
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  pregnancyEpisode PregnancyEpisode    @relation(fields: [pregnancyEpisodeId], references: [id], onDelete: Restrict)
+  admittedBy       User                @relation(fields: [admittedById], references: [id], onDelete: Restrict)
+  observations     LabourObservation[]
+  deliveries       Delivery[]
+
+  @@index([pregnancyEpisodeId])
+  @@map("labour_episodes")
+}
+
+model LabourObservation {
+  id                          Int      @id @default(autoincrement())
+  labourEpisodeId             Int
+  recordedAt                  DateTime @default(now())
+  cervicalDilationCm          Decimal? @db.Decimal(3, 1)
+  descentOfHead               String?  @db.VarChar(30)
+  contractionFrequencyIn10Min Int?
+  contractionDurationSec      Int?
+  fetalHeartRateBpm           Int?
+  maternalPulseBpm            Int?
+  maternalBloodPressure       String?  @db.VarChar(20)
+  maternalTemperature         Decimal? @db.Decimal(4, 1)
+  recordedById                Int
+  remarks                     String?  @db.Text
+
+  labourEpisode LabourEpisode @relation(fields: [labourEpisodeId], references: [id], onDelete: Cascade)
+  recordedBy    User          @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@map("labour_observations")
+}
+
+enum DeliveryMode {
+  SPONTANEOUS_VAGINAL
+  VACUUM_EXTRACTION
+  FORCEPS
+  CAESAREAN_SECTION
+  BREECH_DELIVERY
+  OTHER
+}
+
+enum PerineumStatus {
+  INTACT
+  FIRST_DEGREE_TEAR
+  SECOND_DEGREE_TEAR
+  THIRD_DEGREE_TEAR
+  EPISIOTOMY
+}
+
+model Delivery {
+  id                   Int            @id @default(autoincrement())
+  labourEpisodeId      Int
+  pregnancyEpisodeId   Int
+  deliveryDateTime     DateTime       @default(now())
+  deliveryMode         DeliveryMode   @default(SPONTANEOUS_VAGINAL)
+  placentaDelivered    Boolean        @default(true)
+  placentaMethod       String?        @db.VarChar(50)
+  perineumStatus       PerineumStatus @default(INTACT)
+  estimatedBloodLossMl Int?
+  deliveryNotes        String?        @db.Text
+  deliveredById        Int
+  assistantId          Int?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  labourEpisode    LabourEpisode    @relation(fields: [labourEpisodeId], references: [id], onDelete: Restrict)
+  pregnancyEpisode PregnancyEpisode @relation(fields: [pregnancyEpisodeId], references: [id], onDelete: Restrict)
+  deliveredBy      User             @relation("DeliveredBy", fields: [deliveredById], references: [id], onDelete: Restrict)
+  assistant        User?            @relation("AssistedBy", fields: [assistantId], references: [id], onDelete: SetNull)
+  newborns         Newborn[]
+
+  @@map("deliveries")
+}
+
+enum BirthStatus {
+  LIVE_BIRTH
+  FRESH_STILLBIRTH
+  MACERATED_STILLBIRTH
+}
+
+enum NewbornGender {
+  MALE
+  FEMALE
+  INDETERMINATE
+}
+
+model Newborn {
+  id                    Int           @id @default(autoincrement())
+  deliveryId            Int
+  babyOrder             String        @db.VarChar(30)
+  gender                NewbornGender
+  birthDateTime         DateTime      @default(now())
+  birthWeightKg         Decimal       @db.Decimal(4, 2)
+  birthLengthCm         Decimal?      @db.Decimal(4, 1)
+  headCircumferenceCm   Decimal?      @db.Decimal(4, 1)
+  apgarScore1Min        Int?
+  apgarScore5Min        Int?
+  apgarScore10Min       Int?
+  birthStatus           BirthStatus   @default(LIVE_BIRTH)
+  resuscitationRequired Boolean       @default(false)
+  resuscitationDetails  String?       @db.VarChar(255)
+  abnormalitiesObserved String?       @db.VarChar(255)
+  examinedById          Int
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  delivery              Delivery               @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  examinedBy            User                   @relation(fields: [examinedById], references: [id], onDelete: Restrict)
+  postnatalObservations PostnatalObservation[]
+
+  @@map("newborns")
+}
+
+enum PostnatalType {
+  MATERNAL
+  NEWBORN
+}
+
+model PostnatalObservation {
+  id                 Int           @id @default(autoincrement())
+  pregnancyEpisodeId Int
+  newbornId          Int?
+  observationType    PostnatalType @default(MATERNAL)
+  recordedAt         DateTime      @default(now())
+  vitalSignsSummary  String?       @db.VarChar(255)
+  clinicalNotes      String        @db.Text
+  recordedById       Int
+
+  pregnancyEpisode PregnancyEpisode @relation(fields: [pregnancyEpisodeId], references: [id], onDelete: Restrict)
+  newborn          Newborn?          @relation(fields: [newbornId], references: [id], onDelete: SetNull)
+  recordedBy       User              @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@map("postnatal_observations")
+}
+
+model MaternityDischarge {
+  id                   Int      @id @default(autoincrement())
+  pregnancyEpisodeId   Int      @unique
+  dischargeDate        DateTime @default(now())
+  maternalCondition    String   @db.VarChar(255)
+  newbornCondition     String   @db.VarChar(255)
+  dischargeInstructions String  @db.Text
+  dischargedById       Int
+  createdAt            DateTime @default(now())
+
+  pregnancyEpisode PregnancyEpisode @relation(fields: [pregnancyEpisodeId], references: [id], onDelete: Restrict)
+  dischargedBy     User             @relation(fields: [dischargedById], references: [id], onDelete: Restrict)
+
+  @@map("maternity_discharges")
+}
+
+// =========================================================================
+// 8. AUDIT LOGS & SYSTEM SETTINGS
+// =========================================================================
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int?
+  action     String   @db.VarChar(100)
+  entityType String   @db.VarChar(50)
+  entityId   Int?
+  details    String?  @db.Text
+  ipAddress  String?  @db.VarChar(50)
+  userAgent  String?  @db.VarChar(255)
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SystemSetting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique @db.VarChar(50)
+  value       String   @db.Text
+  category    String   @db.VarChar(50)
+  description String?  @db.VarChar(255)
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
