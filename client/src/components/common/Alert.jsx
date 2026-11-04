@@ -34,3 +34,4 @@ export default function Alert({ title, message, type = 'info', style = {} }) {
     </div>
   );
 }
+

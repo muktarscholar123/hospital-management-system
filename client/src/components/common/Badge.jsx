@@ -29,3 +29,4 @@ export default function Badge({ children, variant = 'neutral' }) {
     </span>
   );
 }
+
